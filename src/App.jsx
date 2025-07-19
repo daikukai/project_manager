@@ -1,10 +1,30 @@
 // src/App.jsx
 
-
 import React, { useState, useEffect, createContext, useContext, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, serverTimestamp, getDocs } from 'firebase/firestore'; // Added getDocs
+import { getFirestore, collection, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, serverTimestamp, getDocs, limit } from 'firebase/firestore';
+
+// --- Material UI Imports ---
+import {
+  Container, AppBar, Toolbar, Typography, Button, Box,
+  TextField, CircularProgress,
+  Paper, Grid, Card, CardContent, CardActions,
+  Dialog, DialogTitle, DialogContent, DialogActions,
+  IconButton, Select, MenuItem, InputLabel, FormControl,
+  Snackbar, Alert, Chip,
+  Stack // Added Stack for better layout control
+} from '@mui/material';
+
+// Import Material Icons
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import AddIcon from '@mui/icons-material/Add';
+import DeleteIcon from '@mui/icons-material/Delete';
+import CloseIcon from '@mui/icons-material/Close';
+import DashboardIcon from '@mui/icons-material/Dashboard'; // New icon for ProjectList header
+import CreateNewFolderIcon from '@mui/icons-material/CreateNewFolder'; // New icon for create project section
+import FolderOpenIcon from '@mui/icons-material/FolderOpen'; // New icon for available projects section
+
 
 // --- Firebase Configuration and Initialization ---
 
@@ -18,14 +38,9 @@ const firebaseConfig = {
   appId: "1:214625929654:web:c0aba18d332dd32b175917"
 };
 
-// Use the projectId from  firebaseConfig as the appId for Firestore paths
-// This is crucial for the security rules and data structure defined.
 const appId = firebaseConfig.projectId;
+const initialAuthToken = null; // Set this to your custom token if you're using one for authentication
 
-
-const initialAuthToken = null; // Set to null for self-implementation
-
-// Initialize Firebase App
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
@@ -36,28 +51,40 @@ const ProjectContext = createContext(null);
 
 // --- Helper Components ---
 
+// Converted to Material UI
 const LoadingSpinner = () => (
-  <div className="flex justify-center items-center h-screen bg-gray-50">
-    <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-indigo-600"></div>
-    <p className="ml-4 text-xl text-gray-700">Loading...</p>
-  </div>
+  <Box
+    sx={{
+      display: 'flex',
+      flexDirection: 'column',
+      justifyContent: 'center',
+      alignItems: 'center',
+      height: '100vh',
+      bgcolor: 'grey.50'
+    }}
+  >
+    <CircularProgress size={80} thickness={4} sx={{ color: 'primary.main', mb: 2 }} />
+    <Typography variant="h6" color="text.secondary">Loading...</Typography>
+  </Box>
 );
 
+// Converted to Material UI Snackbar and Alert
 const ToastNotification = ({ message, type, onClose }) => {
-  const bgColor = type === 'success' ? 'bg-green-500' : 'bg-blue-500';
-  const textColor = 'text-white';
-  const borderColor = type === 'success' ? 'border-green-700' : 'border-blue-700';
-
   return (
-    <div className={`fixed bottom-4 right-4 p-4 rounded-lg shadow-lg flex items-center ${bgColor} ${textColor} border-b-4 ${borderColor} animate-fade-in-up z-50`}>
-      <span className="mr-3">
-        {type === 'success' ? '✅' : '🔔'}
-      </span>
-      <p className="font-semibold">{message}</p>
-      <button onClick={onClose} className="ml-auto text-white hover:text-gray-200">
-        &times;
-      </button>
-    </div>
+    <Snackbar
+      open={!!message}
+      autoHideDuration={5000}
+      onClose={onClose}
+      anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+    >
+      <Alert
+        onClose={onClose}
+        severity={type === 'success' ? 'success' : type === 'error' ? 'error' : 'info'}
+        sx={{ width: '100%', boxShadow: 3 }}
+      >
+        {message}
+      </Alert>
+    </Snackbar>
   );
 };
 
@@ -83,18 +110,16 @@ const AuthProvider = ({ children }) => {
             console.log('Signed in with custom token:', userCredential.user.uid);
           } catch (error) {
             console.error('Error signing in with custom token:', error);
-            // Fallback to anonymous if custom token fails or is not provided
             try {
               const userCredential = await signInAnonymously(auth);
               setCurrentUser(userCredential.user);
               setUserId(userCredential.user.uid);
-              console.log('Signed in anonymously:', userCredential.user.uid);
+              console.log('Signed in anonymously (fallback):', userCredential.user.uid);
             } catch (anonError) {
               console.error('Error signing in anonymously:', anonError);
             }
           }
         } else {
-          // Default to anonymous sign-in if no custom token is provided
           try {
             const userCredential = await signInAnonymously(auth);
             setCurrentUser(userCredential.user);
@@ -171,6 +196,7 @@ const App = () => {
 
   const showToast = useCallback((message, type = 'info') => {
     setToast({ message, type });
+    // Clear toast after 5 seconds
     setTimeout(() => setToast(null), 5000);
   }, []);
 
@@ -180,56 +206,60 @@ const App = () => {
 
     const tasksRef = collection(db, `artifacts/${appId}/public/data/projects/${selectedProject.id}/tasks`);
     const unsubscribeTasks = onSnapshot(tasksRef, (snapshot) => {
-        snapshot.docChanges().forEach((change) => {
-            if (change.type === "added" || change.type === "modified") {
-                const task = { id: change.doc.id, ...change.doc.data() };
-                const commentsRef = collection(db, `artifacts/${appId}/public/data/projects/${selectedProject.id}/tasks/${task.id}/comments`);
-                const qComments = query(commentsRef, orderBy('createdAt', 'desc'), limit(1)); // Listen for the latest comment
+      snapshot.docChanges().forEach((change) => {
+        if (change.type === "added" || change.type === "modified") {
+          const task = { id: change.doc.id, ...change.doc.data() };
+          const commentsRef = collection(db, `artifacts/${appId}/public/data/projects/${selectedProject.id}/tasks/${task.id}/comments`);
+          const qComments = query(commentsRef, orderBy('createdAt', 'desc'), limit(1)); // Listen for the latest comment
 
-                const unsubscribeComments = onSnapshot(qComments, (commentSnapshot) => {
-                    if (!commentSnapshot.empty) {
-                        const latestComment = { id: commentSnapshot.docs[0].id, ...commentSnapshot.docs[0].data() };
-                        if (latestComment.userId !== userId) { // Only show if not my own comment
-                            const commentTime = latestComment.createdAt?.toDate().getTime();
-                            const knownLastTime = lastCommentTimestamp[task.id] || 0;
+          const unsubscribeComments = onSnapshot(qComments, (commentSnapshot) => {
+            if (!commentSnapshot.empty) {
+              const latestComment = { id: commentSnapshot.docs[0].id, ...commentSnapshot.docs[0].data() };
+              if (latestComment.userId !== userId) { // Only show if not my own comment
+                const commentTime = latestComment.createdAt?.toDate().getTime();
+                const knownLastTime = lastCommentTimestamp[task.id] || 0;
 
-                            if (commentTime && commentTime > knownLastTime) {
-                                setLastCommentTimestamp(prev => ({ ...prev, [task.id]: commentTime }));
-                                showToast(`New comment on task "${task.title}" by ${latestComment.userName || 'Someone'}`, 'info');
-                            }
-                        }
-                    }
-                }, (error) => {
-                    console.error("Error listening for comments on task", task.id, ":", error);
-                });
-
-                // Store unsubscribe function to clean up when component unmounts or task changes
-                return () => unsubscribeComments();
+                if (commentTime && commentTime > knownLastTime) {
+                  setLastCommentTimestamp(prev => ({ ...prev, [task.id]: commentTime }));
+                  showToast(`New comment on task "${task.title}" by ${latestComment.userName || 'Someone'}`, 'info');
+                }
+              }
             }
-        });
+          }, (error) => {
+            console.error("Error listening for comments on task", task.id, ":", error);
+          });
+
+          // Cleanup comments listener when task changes or unmounts
+          return () => unsubscribeComments();
+        }
+      });
     }, (error) => {
-        console.error("Error listening for tasks for comment notifications:", error);
+      console.error("Error listening for tasks for comment notifications:", error);
     });
 
     return () => unsubscribeTasks();
-}, [selectedProject, userId, showToast, lastCommentTimestamp]); // Add lastCommentTimestamp to dependencies
+  }, [selectedProject, userId, showToast, lastCommentTimestamp]);
 
   return (
-    <div className="min-h-screen bg-gray-100 font-inter antialiased">
-      <header className="bg-white shadow-sm p-4 flex justify-between items-center z-10 sticky top-0">
-        <h1 className="text-2xl font-bold text-gray-800">Project Manager</h1>
-        <div className="text-gray-600 text-sm">
-          User ID: <span className="font-semibold text-indigo-600">{userId || 'N/A'}</span>
-        </div>
-      </header>
+    <Box sx={{ minHeight: '100vh', bgcolor: 'grey.100', fontFamily: 'Arial, sans-serif' }}>
+      <AppBar position="sticky" elevation={1} sx={{ bgcolor: 'white', zIndex: (theme) => theme.zIndex.drawer + 1 }}>
+        <Toolbar>
+          <Typography variant="h5" component="h1" sx={{ flexGrow: 1, fontWeight: 'bold', color: 'primary.main' }}>
+            Apex Inc
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            User ID: <Box component="span" sx={{ fontWeight: 'bold', color: 'primary.main' }}>{userId || 'N/A'}</Box>
+          </Typography>
+        </Toolbar>
+      </AppBar>
 
-      <main className="container mx-auto px-4 py-8">
+      <Container maxWidth="xl" sx={{ mt: 4, py: 4 }}>
         {selectedProject ? (
           <ProjectBoard project={selectedProject} onBack={() => setSelectedProject(null)} showToast={showToast} />
         ) : (
           <ProjectList showToast={showToast} />
         )}
-      </main>
+      </Container>
 
       {toast && (
         <ToastNotification
@@ -238,23 +268,11 @@ const App = () => {
           onClose={() => setToast(null)}
         />
       )}
-    </div>
+    </Box>
   );
 };
 
-// --- Root Component (Wrapper for Providers) ---
-// This component acts as the main entry point for rendering the app,
-// providing the necessary contexts to its children.
-const Root = () => (
-  <AuthProvider>
-    <ProjectProvider>
-      <App />
-    </ProjectProvider>
-  </AuthProvider>
-);
-
-
-// --- ProjectList Component ---
+// --- ProjectList Component (Updated with Material UI for beautification) ---
 const ProjectList = ({ showToast }) => {
   const { projects, setSelectedProject } = useContext(ProjectContext);
   const { userId } = useContext(AuthContext);
@@ -276,98 +294,212 @@ const ProjectList = ({ showToast }) => {
         description: newProjectDescription.trim(),
         createdAt: serverTimestamp(),
         createdBy: userId,
-        members: [userId] // Creator is default member
+        members: [userId]
       });
       setNewProjectName('');
       setNewProjectDescription('');
       showToast("Project created successfully!", "success");
     } catch (error) {
       console.error("Error creating project:", error);
-      showToast("Error creating project.", "error"); // Use 'error' type for toast
+      showToast("Error creating project.", "error");
     } finally {
       setCreatingProject(false);
     }
   };
 
-  return (
-    <div className="animate-fade-in-up bg-white p-6 rounded-lg shadow-md">
-      <h2 className="text-3xl font-bold text-gray-800 mb-6">Your Projects</h2>
+  const handleDeleteProject = async (projectId, projectName) => {
+    if (!window.confirm(`Are you sure you want to delete the project "${projectName}"? This will also delete all its tasks and comments. This action cannot be undone.`)) {
+      return;
+    }
 
-      <form onSubmit={handleCreateProject} className="mb-8 p-6 bg-indigo-50 rounded-lg shadow-inner">
-        <h3 className="text-xl font-semibold text-indigo-800 mb-4">Create New Project</h3>
-        <div className="mb-4">
-          <label htmlFor="projectName" className="block text-gray-700 text-sm font-bold mb-2">Project Name:</label>
-          <input
-            type="text"
-            id="projectName"
-            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline focus:border-indigo-500"
+    try {
+      // 1. Get all tasks for the project
+      const tasksRef = collection(db, `artifacts/${appId}/public/data/projects/${projectId}/tasks`);
+      const taskDocs = await getDocs(tasksRef);
+
+      // 2. For each task, delete all its comments, then delete the task
+      const deletePromises = taskDocs.docs.map(async (taskDoc) => {
+        const taskId = taskDoc.id;
+        const commentsRef = collection(db, `artifacts/${appId}/public/data/projects/${projectId}/tasks/${taskId}/comments`);
+        const commentDocs = await getDocs(commentsRef);
+        const deleteCommentPromises = commentDocs.docs.map(d => deleteDoc(d.ref));
+        await Promise.all(deleteCommentPromises);
+        return deleteDoc(taskDoc.ref);
+      });
+
+      await Promise.all(deletePromises);
+
+      // 3. Finally, delete the project document
+      const projectRef = doc(db, `artifacts/${appId}/public/data/projects/${projectId}`);
+      await deleteDoc(projectRef);
+
+      showToast(`Project "${projectName}" and all its contents deleted successfully!`, "success");
+      setSelectedProject(null); // Unselect if the deleted project was active
+    } catch (error) {
+      console.error("Error deleting project:", error);
+      showToast("Error deleting project. Please check console for details.", "error");
+    }
+  };
+
+
+  return (
+    <Container maxWidth="lg" sx={{ mt: 4, p: 3, bgcolor: 'background.paper', borderRadius: 2, boxShadow: 3 }}>
+      {/* Enhanced Main Header */}
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 5, flexDirection: 'column' }}>
+        <DashboardIcon sx={{ fontSize: 60, color: 'primary.main', mb: 1 }} />
+        <Typography variant="h3" component="h2" gutterBottom align="center" sx={{ fontWeight: 'bold', color: 'primary.dark' }}>
+          Your Project Hub
+        </Typography>
+        <Typography variant="h6" color="text.secondary" align="center" sx={{ maxWidth: '600px' }}>
+          Organize, track, and manage all your projects efficiently. Create a new project or dive into an existing one.
+        </Typography>
+      </Box>
+
+
+      <Paper elevation={4} sx={{ mb: 6, p: 4, bgcolor: 'primary.50', borderRadius: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+          <CreateNewFolderIcon sx={{ fontSize: 40, color: 'primary.dark', mr: 2 }} />
+          <Typography variant="h5" component="h3" sx={{ color: 'primary.dark', fontWeight: 'bold' }}>
+            Create New Project
+          </Typography>
+        </Box>
+        <Box component="form" onSubmit={handleCreateProject} sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <TextField
+            label="Project Name"
+            variant="outlined"
+            fullWidth
             value={newProjectName}
             onChange={(e) => setNewProjectName(e.target.value)}
-            placeholder="e.g., My Awesome Product Launch"
+            placeholder="e.g., Q3 Marketing Campaign, Website Redesign"
             disabled={creatingProject}
             required
+            InputProps={{
+              startAdornment: (
+                <InputLabel sx={{ position: 'relative', mr: 1, '&:before': { content: '""', display: 'inline-block', height: '1.2em', verticalAlign: 'middle' } }}>
+                  <FolderOpenIcon sx={{ color: 'action.active', mr: 0.5 }} />
+                </InputLabel>
+              ),
+            }}
           />
-        </div>
-        <div className="mb-6">
-          <label htmlFor="projectDescription" className="block text-gray-700 text-sm font-bold mb-2">Description:</label>
-          <textarea
-            id="projectDescription"
-            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline focus:border-indigo-500 h-24 resize-y"
+          <TextField
+            label="Description"
+            variant="outlined"
+            fullWidth
+            multiline
+            rows={4}
             value={newProjectDescription}
             onChange={(e) => setNewProjectDescription(e.target.value)}
-            placeholder="A brief overview of your project."
+            placeholder="Briefly describe the project's goals, scope, or key objectives."
             disabled={creatingProject}
-          ></textarea>
-        </div>
-        <button
-          type="submit"
-          className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline transition duration-200 ease-in-out disabled:opacity-50"
-          disabled={creatingProject}
-        >
-          {creatingProject ? 'Creating...' : 'Create Project'}
-        </button>
-      </form>
+          />
+          <Button
+            type="submit"
+            variant="contained"
+            color="primary"
+            size="large"
+            disabled={creatingProject}
+            sx={{ alignSelf: 'flex-start', px: 4, py: 1.5, borderRadius: 2 }}
+            startIcon={creatingProject ? null : <AddIcon />}
+          >
+            {creatingProject ? (
+              <>
+                <CircularProgress size={24} color="inherit" sx={{ mr: 1 }} />
+                Creating...
+              </>
+            ) : (
+              'Create Project'
+            )}
+          </Button>
+        </Box>
+      </Paper>
 
-      {projects.length === 0 ? (
-        <p className="text-gray-600 text-lg">No projects yet. Create one above!</p>
-      ) : (
-        <div>
-          <h3 className="text-xl font-semibold text-gray-700 mb-4">Available Projects</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <Box sx={{ mt: 6 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+          <FolderOpenIcon sx={{ fontSize: 40, color: 'text.primary', mr: 2 }} />
+          <Typography variant="h5" component="h3" sx={{ color: 'text.primary', fontWeight: 'bold' }}>
+            Available Projects
+          </Typography>
+        </Box>
+
+        {projects.length === 0 ? (
+          <Paper elevation={2} sx={{ p: 4, textAlign: 'center', bgcolor: 'grey.50', borderRadius: 2 }}>
+            <Typography variant="h6" color="text.secondary" sx={{ mb: 2 }}>
+              It looks like you don't have any projects yet.
+            </Typography>
+            <Typography variant="body1" color="text.secondary">
+              Start by creating your first project above!
+            </Typography>
+            <AddIcon sx={{ fontSize: 50, color: 'text.disabled', mt: 3 }} />
+          </Paper>
+        ) : (
+          <Grid container spacing={4}> {/* Increased spacing */}
             {projects.map(project => (
-              <div
-                key={project.id}
-                className="bg-gray-50 border border-gray-200 rounded-lg shadow-sm p-6 transform hover:scale-105 transition duration-200 ease-in-out cursor-pointer animate-scale-in"
-                onClick={() => setSelectedProject(project)}
-              >
-                <h4 className="text-xl font-semibold text-indigo-700 mb-2">{project.name}</h4>
-                <p className="text-gray-600 text-sm mb-3 line-clamp-3">{project.description || 'No description provided.'}</p>
-                <div className="text-xs text-gray-500 mt-2">
-                  Created: {project.createdAt?.toDate ? new Date(project.createdAt.toDate()).toLocaleDateString() : 'N/A'}
-                </div>
-                <button
-                  onClick={(e) => { e.stopPropagation(); setSelectedProject(project); }}
-                  className="mt-4 bg-indigo-500 hover:bg-indigo-600 text-white text-sm py-2 px-4 rounded-md shadow-md transition-colors"
+              <Grid item xs={12} sm={6} md={4} key={project.id}>
+                <Card
+                  sx={{
+                    height: '100%',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                    p: 2,
+                    transition: 'transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out',
+                    '&:hover': {
+                      transform: 'translateY(-5px)',
+                      boxShadow: 8,
+                    },
+                    borderRadius: 2,
+                    border: '1px solid',
+                    borderColor: 'grey.200'
+                  }}
                 >
-                  View Board
-                </button>
-              </div>
+                  <CardContent sx={{ flexGrow: 1, cursor: 'pointer', pb: 0 }} onClick={() => setSelectedProject(project)}>
+                    <Typography variant="h6" component="h4" sx={{ mb: 1.5, color: 'secondary.main', fontWeight: 'bold' }}>
+                      {project.name}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2, minHeight: '3em', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                      {project.description || 'No description provided for this project.'}
+                    </Typography>
+                    <Typography variant="caption" color="text.disabled" sx={{ fontStyle: 'italic' }}>
+                      Created: {project.createdAt?.toDate ? new Date(project.createdAt.toDate()).toLocaleDateString() : 'N/A'}
+                    </Typography>
+                  </CardContent>
+                  <CardActions sx={{ justifyContent: 'space-between', pt: 2 }}>
+                    <Button
+                      size="small"
+                      variant="contained" // Changed to contained for more prominence
+                      color="primary"
+                      onClick={(e) => { e.stopPropagation(); setSelectedProject(project); }}
+                      sx={{ px: 3 }}
+                    >
+                      View Board
+                    </Button>
+                    <IconButton
+                      aria-label={`delete project ${project.name}`}
+                      onClick={(e) => { e.stopPropagation(); handleDeleteProject(project.id, project.name); }}
+                      color="error"
+                      size="medium" // Increased size
+                    >
+                      <DeleteIcon />
+                    </IconButton>
+                  </CardActions>
+                </Card>
+              </Grid>
             ))}
-          </div>
-        </div>
-      )}
-    </div>
+          </Grid>
+        )}
+      </Box>
+    </Container>
   );
 };
 
-// --- ProjectBoard Component ---
+// --- ProjectBoard Component (Converted to Material UI) ---
 const ProjectBoard = ({ project, onBack, showToast }) => {
   const [tasks, setTasks] = useState([]);
   const { userId } = useContext(AuthContext);
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskDescription, setNewTaskDescription] = useState('');
   const [showAddTaskModal, setShowAddTaskModal] = useState(false);
-  const [selectedTask, setSelectedTask] = useState(null); // For TaskModal
+  const [selectedTask, setSelectedTask] = useState(null);
 
   useEffect(() => {
     if (!project?.id) return;
@@ -397,16 +529,16 @@ const ProjectBoard = ({ project, onBack, showToast }) => {
       await addDoc(tasksRef, {
         title: newTaskTitle.trim(),
         description: newTaskDescription.trim(),
-        status: 'todo', // Default status
+        status: 'todo',
         assignedTo: null,
         assignedToDisplayName: null,
         createdAt: serverTimestamp(),
         createdBy: userId,
-        projectId: project.id // Redundant but good for queries
+        projectId: project.id // Store project ID in task for easier queries if needed
       });
       setNewTaskTitle('');
       setNewTaskDescription('');
-      setShowAddTaskModal(false);
+      setShowAddTaskModal(false); // Close modal after adding
       showToast("Task added successfully!", "success");
     } catch (error) {
       console.error("Error adding task:", error);
@@ -415,36 +547,47 @@ const ProjectBoard = ({ project, onBack, showToast }) => {
   };
 
   return (
-    <div className="animate-fade-in-up">
-      <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-200">
-        <button
+    <Box sx={{ mt: 2 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 4, pb: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
+        <Button
           onClick={onBack}
-          className="bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-2 px-4 rounded-lg flex items-center transition-colors"
+          variant="outlined"
+          startIcon={<ArrowBackIcon />}
+          sx={{ mr: 2 }}
         >
-          <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
           Back to Projects
-        </button>
-        <h2 className="text-3xl font-bold text-indigo-700">{project.name} Board</h2>
-        <button
+        </Button>
+        <Typography variant="h4" component="h2" sx={{ flexGrow: 1, textAlign: 'center', color: 'primary.dark', fontWeight: 'bold' }}>
+          {project.name} Board
+        </Typography>
+        <Button
           onClick={() => setShowAddTaskModal(true)}
-          className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg shadow-md transition-colors flex items-center"
+          variant="contained"
+          color="primary"
+          startIcon={<AddIcon />}
         >
-          <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>
           Add New Task
-        </button>
-      </div>
+        </Button>
+      </Box>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <TaskList title="To Do" status="todo" tasks={tasks} setSelectedTask={setSelectedTask} />
-        <TaskList title="In Progress" status="in-progress" tasks={tasks} setSelectedTask={setSelectedTask} />
-        <TaskList title="Done" status="done" tasks={tasks} setSelectedTask={setSelectedTask} />
-      </div>
+      <Grid container spacing={3}>
+        <Grid item xs={12} md={4}>
+          <TaskList title="To Do" status="todo" tasks={tasks} setSelectedTask={setSelectedTask} />
+        </Grid>
+        <Grid item xs={12} md={4}>
+          <TaskList title="In Progress" status="in-progress" tasks={tasks} setSelectedTask={setSelectedTask} />
+        </Grid>
+        <Grid item xs={12} md={4}>
+          <TaskList title="Done" status="done" tasks={tasks} setSelectedTask={setSelectedTask} />
+        </Grid>
+      </Grid>
 
+      {/* Add Task Modal */}
       {showAddTaskModal && (
         <TaskModal
           title="Add New Task"
           onClose={() => setShowAddTaskModal(false)}
-          onSubmit={handleAddTask}
+          onSubmit={handleAddTask} // ProjectBoard's handleAddTask
           taskData={{ title: newTaskTitle, description: newTaskDescription }}
           setTaskData={{ setTitle: setNewTaskTitle, setDescription: setNewTaskDescription }}
           isNewTask={true}
@@ -452,61 +595,86 @@ const ProjectBoard = ({ project, onBack, showToast }) => {
         />
       )}
 
+      {/* Edit Task Modal */}
       {selectedTask && (
         <TaskModal
           title="Edit Task"
           onClose={() => setSelectedTask(null)}
           task={selectedTask}
-          project={project}
+          project={project} // Pass project so comments can be fetched
           showToast={showToast}
         />
       )}
-    </div>
+    </Box>
   );
 };
 
-// --- TaskList Component ---
+// --- TaskList Component (Converted to Material UI) ---
 const TaskList = ({ title, status, tasks, setSelectedTask }) => {
   const filteredTasks = tasks.filter(task => task.status === status);
 
   return (
-    <div className="bg-white rounded-lg shadow-md p-4 min-h-[300px] flex flex-col">
-      <h3 className="text-xl font-semibold text-gray-700 border-b pb-3 mb-4">{title} ({filteredTasks.length})</h3>
-      <div className="flex-grow space-y-3">
+    <Paper elevation={2} sx={{ p: 2, minHeight: '300px', display: 'flex', flexDirection: 'column' }}>
+      <Typography variant="h6" component="h3" sx={{ borderBottom: '1px solid', borderColor: 'divider', pb: 1, mb: 2, color: 'text.primary' }}>
+        {title} ({filteredTasks.length})
+      </Typography>
+      <Box sx={{ flexGrow: 1, overflowY: 'auto', pr: 1 }}>
         {filteredTasks.length === 0 ? (
-          <p className="text-gray-500 text-center py-4">No tasks in this column.</p>
+          <Typography variant="body2" color="text.secondary" align="center" sx={{ py: 4 }}>
+            No tasks in this column.
+          </Typography>
         ) : (
-          filteredTasks.map(task => (
-            <TaskCard key={task.id} task={task} setSelectedTask={setSelectedTask} />
-          ))
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {filteredTasks.map(task => (
+              <TaskCard key={task.id} task={task} setSelectedTask={setSelectedTask} />
+            ))}
+          </Box>
         )}
-      </div>
-    </div>
+      </Box>
+    </Paper>
   );
 };
 
-// --- TaskCard Component ---
+// --- TaskCard Component (Converted to Material UI) ---
 const TaskCard = ({ task, setSelectedTask }) => {
   return (
-    <div
-      className="bg-gray-50 border border-gray-200 p-4 rounded-lg shadow-sm cursor-pointer hover:shadow-md transition-all duration-200 animate-scale-in"
+    <Card
       onClick={() => setSelectedTask(task)}
+      sx={{
+        bgcolor: 'grey.50',
+        border: '1px solid',
+        borderColor: 'grey.200',
+        p: 2,
+        borderRadius: 1,
+        boxShadow: 1,
+        cursor: 'pointer',
+        transition: 'transform 0.2s, box-shadow 0.2s',
+        '&:hover': {
+          transform: 'translateY(-3px)',
+          boxShadow: 3,
+        }
+      }}
     >
-      <h4 className="text-lg font-medium text-gray-800 mb-1">{task.title}</h4>
-      {task.description && (
-        <p className="text-sm text-gray-600 line-clamp-2 mb-2">{task.description}</p>
-      )}
-      {task.assignedToDisplayName && (
-        <span className="inline-flex items-center rounded-md bg-indigo-50 px-2 py-1 text-xs font-medium text-indigo-700 ring-1 ring-inset ring-indigo-700/10">
-          {task.assignedToDisplayName}
-        </span>
-      )}
-    </div>
+      <CardContent sx={{ p: 0, '&:last-child': { pb: 0 } }}>
+        <Typography variant="subtitle1" component="h4" sx={{ mb: 1, color: 'text.primary', fontWeight: 'medium' }}>
+          {task.title}
+        </Typography>
+        {task.description && (
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+            {task.description}
+          </Typography>
+        )}
+        {task.assignedToDisplayName && (
+          <Chip label={task.assignedToDisplayName} color="primary" variant="outlined" size="small" />
+        )}
+      </CardContent>
+    </Card>
   );
 };
 
 // --- TaskModal Component (for Add/Edit Task & Comments) ---
-const TaskModal = ({ title, onClose, task, project, onSubmit, isNewTask = false, showToast }) => {
+const TaskModal = ({ title, onClose, task, project, onSubmit, isNewTask = false, showToast, taskData, setTaskData }) => {
+  // State for *editing* existing tasks. For new tasks, we'll use taskData/setTaskData directly.
   const [currentTitle, setCurrentTitle] = useState(task?.title || '');
   const [currentDescription, setCurrentDescription] = useState(task?.description || '');
   const [currentStatus, setCurrentStatus] = useState(task?.status || 'todo');
@@ -515,9 +683,10 @@ const TaskModal = ({ title, onClose, task, project, onSubmit, isNewTask = false,
 
   const [comments, setComments] = useState([]);
   const [newCommentText, setNewCommentText] = useState('');
-  const { userId, currentUser } = useContext(AuthContext); // Get currentUser to access displayName/email
+  const { userId, currentUser } = useContext(AuthContext);
 
   useEffect(() => {
+    // This effect only runs for existing tasks to fetch their comments
     if (!isNewTask && task?.id && project?.id) {
       const commentsRef = collection(db, `artifacts/${appId}/public/data/projects/${project.id}/tasks/${task.id}/comments`);
       const q = query(commentsRef, orderBy('createdAt', 'asc'));
@@ -534,8 +703,11 @@ const TaskModal = ({ title, onClose, task, project, onSubmit, isNewTask = false,
 
   const handleSave = async (e) => {
     e.preventDefault();
+    // When adding a new task, ProjectBoard's handleAddTask handles its own validation.
+    // When editing an existing task, TaskModal handles its validation.
     if (isNewTask) {
-      onSubmit(e); // Call parent's onSubmit for new task creation
+      // For new tasks, onSubmit is handleAddTask from ProjectBoard
+      onSubmit(e);
     } else {
       if (!currentTitle.trim()) {
         showToast("Task title cannot be empty.", "info");
@@ -547,8 +719,8 @@ const TaskModal = ({ title, onClose, task, project, onSubmit, isNewTask = false,
           title: currentTitle.trim(),
           description: currentDescription.trim(),
           status: currentStatus,
-          assignedTo: currentAssignedTo || null,
-          assignedToDisplayName: currentAssignedToDisplayName || null
+          assignedTo: currentAssignedTo || null, // Store null if empty string
+          assignedToDisplayName: currentAssignedToDisplayName || null // Store null if empty string
         });
         showToast("Task updated successfully!", "success");
         onClose();
@@ -562,18 +734,18 @@ const TaskModal = ({ title, onClose, task, project, onSubmit, isNewTask = false,
   const handleDeleteTask = async () => {
     if (window.confirm("Are you sure you want to delete this task and all its comments? This action cannot be undone.")) {
       try {
-        // Delete comments first (Firestore doesn't auto-delete subcollections)
+        // Delete all comments first
         const commentsRef = collection(db, `artifacts/${appId}/public/data/projects/${project.id}/tasks/${task.id}/comments`);
         const commentDocs = await getDocs(commentsRef);
         const deleteCommentPromises = commentDocs.docs.map(d => deleteDoc(d.ref));
         await Promise.all(deleteCommentPromises);
 
-        // Then delete the task itself
+        // Then delete the task
         const taskRef = doc(db, `artifacts/${appId}/public/data/projects/${project.id}/tasks/${task.id}`);
         await deleteDoc(taskRef);
 
         showToast("Task deleted successfully!", "success");
-        onClose();
+        onClose(); // Close the modal after deletion
       } catch (error) {
         console.error("Error deleting task:", error);
         showToast("Error deleting task.", "error");
@@ -591,9 +763,9 @@ const TaskModal = ({ title, onClose, task, project, onSubmit, isNewTask = false,
         text: newCommentText.trim(),
         createdAt: serverTimestamp(),
         userId: userId,
-        userName: currentUser?.displayName || currentUser?.email || 'Anonymous User' // Use display name or email if available
+        userName: currentUser?.displayName || currentUser?.email || 'Anonymous User' // Use display name or email, fallback to Anonymous
       });
-      setNewCommentText('');
+      setNewCommentText(''); // Clear the input field
     } catch (error) {
       console.error("Error adding comment:", error);
       showToast("Error adding comment.", "error");
@@ -601,130 +773,167 @@ const TaskModal = ({ title, onClose, task, project, onSubmit, isNewTask = false,
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 animate-fade-in-up">
-      <div className="bg-white rounded-lg shadow-xl p-8 w-full max-w-2xl max-h-[90vh] overflow-y-auto transform animate-scale-in">
-        <div className="flex justify-between items-center border-b pb-4 mb-6">
-          <h3 className="text-2xl font-bold text-gray-800">{title}</h3>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-700 text-3xl">&times;</button>
-        </div>
+    <Dialog open onClose={onClose} maxWidth="md" fullWidth>
+      <DialogTitle>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Typography variant="h5" component="span" sx={{ fontWeight: 'bold' }}>{title}</Typography>
+          <IconButton onClick={onClose}><CloseIcon /></IconButton>
+        </Box>
+      </DialogTitle>
+      <DialogContent dividers>
+        <Box component="form" onSubmit={handleSave} sx={{ mb: 4 }}>
+          {/* Title TextField */}
+          <TextField
+            label="Title"
+            variant="outlined"
+            fullWidth
+            // Conditionally use parent state for new tasks, or internal state for existing
+            value={isNewTask ? (taskData?.title || '') : currentTitle}
+            onChange={(e) => {
+              if (isNewTask) {
+                setTaskData?.setTitle(e.target.value);
+              } else {
+                setCurrentTitle(e.target.value);
+              }
+            }}
+            required
+            sx={{ mb: 3 }}
+          />
+          {/* Description TextField */}
+          <TextField
+            label="Description"
+            variant="outlined"
+            fullWidth
+            multiline
+            rows={4}
+            // Conditionally use parent state for new tasks, or internal state for existing
+            value={isNewTask ? (taskData?.description || '') : currentDescription}
+            onChange={(e) => {
+              if (isNewTask) {
+                setTaskData?.setDescription(e.target.value);
+              } else {
+                setCurrentDescription(e.target.value);
+              }
+            }}
+            sx={{ mb: 3 }}
+          />
 
-        <form onSubmit={handleSave}>
-          <div className="mb-4">
-            <label htmlFor="taskTitle" className="block text-gray-700 text-sm font-bold mb-2">Title:</label>
-            <input
-              type="text"
-              id="taskTitle"
-              className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline focus:border-indigo-500"
-              value={currentTitle}
-              onChange={(e) => setCurrentTitle(e.target.value)}
-              required
-            />
-          </div>
-          <div className="mb-4">
-            <label htmlFor="taskDescription" className="block text-gray-700 text-sm font-bold mb-2">Description:</label>
-            <textarea
-              id="taskDescription"
-              className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline focus:border-indigo-500 h-24 resize-y"
-              value={currentDescription}
-              onChange={(e) => setCurrentDescription(e.target.value)}
-            ></textarea>
-          </div>
-
+          {/* Conditional fields only for existing tasks */}
           {!isNewTask && (
             <>
-              <div className="mb-4">
-                <label htmlFor="taskStatus" className="block text-gray-700 text-sm font-bold mb-2">Status:</label>
-                <select
+              <FormControl fullWidth variant="outlined" sx={{ mb: 3 }}>
+                <InputLabel id="task-status-label">Status</InputLabel>
+                <Select
+                  labelId="task-status-label"
                   id="taskStatus"
-                  className="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline focus:border-indigo-500"
                   value={currentStatus}
                   onChange={(e) => setCurrentStatus(e.target.value)}
+                  label="Status"
                 >
-                  <option value="todo">To Do</option>
-                  <option value="in-progress">In Progress</option>
-                  <option value="done">Done</option>
-                </select>
-              </div>
-              <div className="mb-6">
-                <label htmlFor="assignedTo" className="block text-gray-700 text-sm font-bold mb-2">Assigned To (User ID):</label>
-                <input
-                  type="text"
-                  id="assignedTo"
-                  className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline focus:border-indigo-500"
-                  value={currentAssignedTo}
-                  onChange={(e) => setCurrentAssignedTo(e.target.value)}
-                  placeholder="Enter User ID (optional)"
-                />
-                 <label htmlFor="assignedToDisplayName" className="block text-gray-700 text-sm font-bold mb-2 mt-2">Assigned To (Display Name - optional):</label>
-                <input
-                  type="text"
-                  id="assignedToDisplayName"
-                  className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline focus:border-indigo-500"
-                  value={currentAssignedToDisplayName}
-                  onChange={(e) => setCurrentAssignedToDisplayName(e.target.value)}
-                  placeholder="e.g., John Doe"
-                />
-              </div>
+                  <MenuItem value="todo">To Do</MenuItem>
+                  <MenuItem value="in-progress">In Progress</MenuItem>
+                  <MenuItem value="done">Done</MenuItem>
+                </Select>
+              </FormControl>
+              <TextField
+                label="Assigned To (User ID)"
+                variant="outlined"
+                fullWidth
+                value={currentAssignedTo}
+                onChange={(e) => setCurrentAssignedTo(e.target.value)}
+                placeholder="Enter User ID (optional)"
+                sx={{ mb: 3 }}
+              />
+              <TextField
+                label="Assigned To (Display Name - optional)"
+                variant="outlined"
+                fullWidth
+                value={currentAssignedToDisplayName}
+                onChange={(e) => setCurrentAssignedToDisplayName(e.target.value)}
+                placeholder="e.g., John Doe"
+                sx={{ mb: 3 }}
+              />
             </>
           )}
 
-          <div className="flex justify-between items-center mb-6">
-            <button
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 3 }}>
+            <Button
               type="submit"
-              className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline transition duration-200 ease-in-out"
+              variant="contained"
+              color="primary"
+              size="large"
             >
               {isNewTask ? 'Add Task' : 'Save Changes'}
-            </button>
+            </Button>
             {!isNewTask && (
-              <button
+              <Button
                 type="button"
                 onClick={handleDeleteTask}
-                className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline transition duration-200 ease-in-out"
+                variant="outlined"
+                color="error"
+                startIcon={<DeleteIcon />}
               >
                 Delete Task
-              </button>
+              </Button>
             )}
-          </div>
-        </form>
+          </Box>
+        </Box>
 
+        {/* Comments section is only for existing tasks */}
         {!isNewTask && (
-          <div className="mt-8 border-t pt-6">
-            <h4 className="text-xl font-bold text-gray-800 mb-4">Comments</h4>
-            <div className="max-h-48 overflow-y-auto mb-4 bg-gray-50 p-3 rounded-lg border">
+          <Box sx={{ mt: 4, pt: 3, borderTop: '1px solid', borderColor: 'divider' }}>
+            <Typography variant="h6" component="h4" gutterBottom sx={{ mb: 2, fontWeight: 'bold' }}>Comments</Typography>
+            <Paper elevation={0} sx={{ maxHeight: '200px', overflowY: 'auto', p: 2, mb: 3, bgcolor: 'grey.50', border: '1px solid', borderColor: 'grey.200' }}>
               {comments.length === 0 ? (
-                <p className="text-gray-500 text-sm">No comments yet. Be the first to add one!</p>
+                <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 2 }}>
+                  No comments yet. Be the first to add one!
+                </Typography>
               ) : (
                 comments.map(comment => (
-                  <div key={comment.id} className="mb-3 p-2 border-b last:border-b-0 border-gray-100">
-                    <p className="text-gray-800 text-sm">{comment.text}</p>
-                    <p className="text-xs text-gray-500 mt-1">
+                  <Box key={comment.id} sx={{ mb: 2, pb: 2, borderBottom: '1px solid', borderColor: 'grey.100', '&:last-child': { borderBottom: 'none', mb: 0, pb: 0 } }}>
+                    <Typography variant="body2" color="text.primary">{comment.text}</Typography>
+                    <Typography variant="caption" color="text.disabled" sx={{ mt: 0.5 }}>
                       — {comment.userName || 'Anonymous'} at {comment.createdAt?.toDate ? new Date(comment.createdAt.toDate()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'N/A'}
-                    </p>
-                  </div>
+                    </Typography>
+                  </Box>
                 ))
               )}
-            </div>
-            <form onSubmit={handleAddComment} className="flex gap-2">
-              <textarea
-                className="flex-grow shadow appearance-none border rounded py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline focus:border-indigo-500 resize-none h-16"
+            </Paper>
+            <Box component="form" onSubmit={handleAddComment} sx={{ display: 'flex', gap: 2 }}>
+              <TextField
+                variant="outlined"
+                fullWidth
+                multiline
+                rows={2}
                 placeholder="Add a comment..."
                 value={newCommentText}
                 onChange={(e) => setNewCommentText(e.target.value)}
                 required
-              ></textarea>
-              <button
+              />
+              <Button
                 type="submit"
-                className="bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg focus:outline-none focus:shadow-outline transition duration-200 ease-in-out"
+                variant="contained"
+                color="secondary"
+                sx={{ flexShrink: 0 }}
               >
                 Post
-              </button>
-            </form>
-          </div>
+              </Button>
+            </Box>
+          </Box>
         )}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 };
 
+
+// --- Root Component (Wrapper for Providers) ---
+const Root = () => (
+  <AuthProvider>
+    <ProjectProvider>
+      <App />
+    </ProjectProvider>
+  </AuthProvider>
+);
 
 export default Root;
